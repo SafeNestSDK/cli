@@ -7,7 +7,7 @@ import Conf from 'conf';
 import { SafeNestClient } from '@safenest/sdk';
 
 const config = new Conf({ projectName: 'safenest' });
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 
 function getClient(): SafeNestClient {
   const apiKey = config.get('apiKey') as string;
@@ -296,6 +296,65 @@ program
       result.steps.forEach((step: string, i: number) => {
         console.log(chalk.cyan(`  ${i + 1}. `) + step);
       });
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// Account management (GDPR)
+const account = program
+  .command('account')
+  .description('Account data management (GDPR compliance)');
+
+account
+  .command('delete')
+  .description('Delete all account data (GDPR Article 17 — Right to Erasure)')
+  .option('--confirm', 'Skip confirmation prompt')
+  .action(async (options) => {
+    if (!options.confirm) {
+      console.log(chalk.red.bold('⚠ WARNING: This will permanently delete ALL your account data.'));
+      console.log(chalk.dim('Run with --confirm to proceed.'));
+      process.exit(0);
+    }
+
+    const spinner = ora('Deleting account data...').start();
+    try {
+      const client = getClient();
+      const result = await client.deleteAccountData();
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.green.bold('✓ Account data deleted'));
+      console.log(`Deleted records: ${chalk.cyan(String(result.deleted_count))}`);
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+account
+  .command('export')
+  .description('Export all account data as JSON (GDPR Article 20 — Right to Data Portability)')
+  .option('-o, --output <file>', 'Output file path (default: stdout)')
+  .action(async (options) => {
+    const spinner = ora('Exporting account data...').start();
+    try {
+      const client = getClient();
+      const result = await client.exportAccountData();
+      spinner.stop();
+
+      const json = JSON.stringify(result, null, 2);
+
+      if (options.output) {
+        const fs = await import('fs');
+        fs.writeFileSync(options.output, json);
+        console.log(chalk.green.bold('✓ Data exported to ' + options.output));
+      } else {
+        console.log(json);
+      }
     } catch (error) {
       spinner.stop();
       console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);

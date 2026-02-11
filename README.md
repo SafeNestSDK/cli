@@ -113,6 +113,26 @@ Consider having a supportive conversation about their school experience...
 
 Sign up at [safenest.dev](https://safenest.dev) to get your API key.
 
+## Best Practices
+
+### Message Batching
+
+The `bullying` and `unsafe` commands analyze a single text input per request. If you're analyzing a conversation, concatenate a **sliding window of recent messages** into one string rather than piping each message individually. Single words or short fragments lack context for accurate detection and can be exploited to bypass safety filters.
+
+```bash
+# Bad — each line analyzed in isolation
+cat messages.txt | while read line; do safenest bullying "$line"; done
+
+# Good — analyze the full conversation
+safenest bullying "$(cat messages.txt)"
+```
+
+The `grooming` command already accepts multiple messages and analyzes the full conversation in context.
+
+### PII Redaction
+
+Enable `PII_REDACTION_ENABLED=true` on your SafeNest API to automatically strip emails, phone numbers, URLs, social handles, IPs, and other PII from detection summaries and webhook payloads. The original text is still analyzed in full — only stored outputs are scrubbed.
+
 ## License
 
 MIT
