@@ -4,18 +4,18 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import Conf from 'conf';
-import { SafeNestClient } from '@safenest/sdk';
+import { TuteliqClient } from '@tuteliq/sdk';
 
-const config = new Conf({ projectName: 'safenest' });
+const config = new Conf({ projectName: 'tuteliq' });
 const VERSION = '1.1.0';
 
-function getClient(): SafeNestClient {
+function getClient(): TuteliqClient {
   const apiKey = config.get('apiKey') as string;
   if (!apiKey) {
-    console.error(chalk.red('Not logged in. Run: safenest login <api-key>'));
+    console.error(chalk.red('Not logged in. Run: tuteliq login <api-key>'));
     process.exit(1);
   }
-  return new SafeNestClient(apiKey);
+  return new TuteliqClient(apiKey);
 }
 
 function formatSeverity(severity: string): string {
@@ -43,8 +43,8 @@ function formatRisk(risk: string): string {
 const program = new Command();
 
 program
-  .name('safenest')
-  .description('SafeNest CLI - AI-powered child safety analysis')
+  .name('tuteliq')
+  .description('Tuteliq CLI - AI-powered child safety analysis')
   .version(VERSION);
 
 // Login command
@@ -78,7 +78,7 @@ program
       console.log(chalk.dim('API Key: ' + masked));
     } else {
       console.log(chalk.yellow('Not logged in'));
-      console.log(chalk.dim('Run: safenest login <api-key>'));
+      console.log(chalk.dim('Run: tuteliq login <api-key>'));
     }
   });
 
@@ -355,6 +355,250 @@ account
       } else {
         console.log(json);
       }
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+account
+  .command('consent-record')
+  .description('Record consent (GDPR Article 7)')
+  .requiredOption('-t, --type <type>', 'Consent type (data_processing, analytics, marketing, third_party_sharing, child_safety_monitoring)')
+  .requiredOption('-v, --version <version>', 'Policy version')
+  .action(async (options) => {
+    const spinner = ora('Recording consent...').start();
+    try {
+      const client = getClient();
+      const result = await client.recordConsent({
+        consent_type: options.type,
+        version: options.version,
+      });
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.green.bold('✓ Consent recorded'));
+      console.log(`Type: ${chalk.cyan(result.consent.consent_type)}`);
+      console.log(`Status: ${chalk.cyan(result.consent.status)}`);
+      console.log(`Version: ${chalk.cyan(result.consent.version)}`);
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+account
+  .command('consent-status')
+  .description('Get consent status (GDPR Article 7)')
+  .option('-t, --type <type>', 'Filter by consent type')
+  .action(async (options) => {
+    const spinner = ora('Fetching consent status...').start();
+    try {
+      const client = getClient();
+      const result = await client.getConsentStatus(options.type);
+      spinner.stop();
+
+      if (result.consents.length === 0) {
+        console.log(chalk.dim('No consent records found.'));
+        return;
+      }
+
+      console.log();
+      for (const consent of result.consents) {
+        const statusColor = consent.status === 'granted' ? chalk.green : chalk.red;
+        console.log(`${chalk.bold(consent.consent_type)}: ${statusColor(consent.status)} (v${consent.version})`);
+      }
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+account
+  .command('consent-withdraw')
+  .description('Withdraw consent (GDPR Article 7.3)')
+  .requiredOption('-t, --type <type>', 'Consent type to withdraw')
+  .action(async (options) => {
+    const spinner = ora('Withdrawing consent...').start();
+    try {
+      const client = getClient();
+      const result = await client.withdrawConsent(options.type);
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.yellow.bold('✓ Consent withdrawn'));
+      console.log(`Type: ${chalk.cyan(result.consent.consent_type)}`);
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+account
+  .command('audit-logs')
+  .description('Get audit trail (GDPR Article 15)')
+  .option('-a, --action <action>', 'Filter by action type')
+  .option('-l, --limit <limit>', 'Maximum number of results')
+  .action(async (options) => {
+    const spinner = ora('Fetching audit logs...').start();
+    try {
+      const client = getClient();
+      const result = await client.getAuditLogs({
+        action: options.action,
+        limit: options.limit ? parseInt(options.limit, 10) : undefined,
+      });
+      spinner.stop();
+
+      if (result.audit_logs.length === 0) {
+        console.log(chalk.dim('No audit logs found.'));
+        return;
+      }
+
+      console.log();
+      for (const log of result.audit_logs) {
+        console.log(`${chalk.dim(log.created_at)} ${chalk.bold(log.action)} ${chalk.dim(`(${log.id})`)}`);
+      }
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// Breach management
+const breach = program
+  .command('breach')
+  .description('Data breach management (GDPR Article 33/34)');
+
+breach
+  .command('log')
+  .description('Log a new data breach')
+  .requiredOption('-t, --title <title>', 'Breach title')
+  .requiredOption('-d, --description <description>', 'Breach description')
+  .requiredOption('-s, --severity <severity>', 'Severity: low, medium, high, critical')
+  .requiredOption('-u, --users <ids>', 'Affected user IDs (comma-separated)')
+  .requiredOption('-c, --categories <categories>', 'Data categories (comma-separated)')
+  .requiredOption('-r, --reported-by <reporter>', 'Who reported the breach')
+  .action(async (options) => {
+    const spinner = ora('Logging breach...').start();
+    try {
+      const client = getClient();
+      const result = await client.logBreach({
+        title: options.title,
+        description: options.description,
+        severity: options.severity,
+        affected_user_ids: options.users.split(',').map((s: string) => s.trim()),
+        data_categories: options.categories.split(',').map((s: string) => s.trim()),
+        reported_by: options.reportedBy,
+      });
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.red.bold('⚠ Breach logged'));
+      console.log(`ID:       ${chalk.cyan(result.breach.id)}`);
+      console.log(`Title:    ${result.breach.title}`);
+      console.log(`Severity: ${formatSeverity(result.breach.severity)}`);
+      console.log(`Status:   ${chalk.yellow(result.breach.status)}`);
+      console.log(`Deadline: ${chalk.dim(result.breach.notification_deadline)}`);
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+breach
+  .command('list')
+  .description('List data breaches')
+  .option('-s, --status <status>', 'Filter by status: detected, investigating, contained, reported, resolved')
+  .option('-l, --limit <limit>', 'Maximum number of results')
+  .action(async (options) => {
+    const spinner = ora('Fetching breaches...').start();
+    try {
+      const client = getClient();
+      const result = await client.listBreaches({
+        status: options.status,
+        limit: options.limit ? parseInt(options.limit, 10) : undefined,
+      });
+      spinner.stop();
+
+      if (result.breaches.length === 0) {
+        console.log(chalk.dim('No breaches found.'));
+        return;
+      }
+
+      console.log();
+      for (const b of result.breaches) {
+        console.log(`${formatSeverity(b.severity)} ${chalk.bold(b.title)} ${chalk.dim(`(${b.id})`)}`);
+        console.log(`  Status: ${chalk.yellow(b.status)} | Notification: ${chalk.yellow(b.notification_status)} | ${chalk.dim(b.created_at)}`);
+      }
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+breach
+  .command('get <id>')
+  .description('Get a single breach by ID')
+  .action(async (id: string) => {
+    const spinner = ora('Fetching breach...').start();
+    try {
+      const client = getClient();
+      const result = await client.getBreach(id);
+      spinner.stop();
+
+      const b = result.breach;
+      console.log();
+      console.log(chalk.bold(b.title));
+      console.log();
+      console.log(`ID:            ${chalk.cyan(b.id)}`);
+      console.log(`Severity:      ${formatSeverity(b.severity)}`);
+      console.log(`Status:        ${chalk.yellow(b.status)}`);
+      console.log(`Notification:  ${chalk.yellow(b.notification_status)}`);
+      console.log(`Reported By:   ${b.reported_by}`);
+      console.log(`Deadline:      ${chalk.dim(b.notification_deadline)}`);
+      console.log(`Created:       ${chalk.dim(b.created_at)}`);
+      console.log(`Updated:       ${chalk.dim(b.updated_at)}`);
+      console.log();
+      console.log(chalk.dim('Description:'));
+      console.log(b.description);
+      console.log();
+      console.log(`Affected Users:   ${b.affected_user_ids.join(', ')}`);
+      console.log(`Data Categories:  ${b.data_categories.join(', ')}`);
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+breach
+  .command('update <id>')
+  .description('Update a breach status')
+  .requiredOption('-s, --status <status>', 'New status: detected, investigating, contained, reported, resolved')
+  .option('-n, --notification <status>', 'Notification status: pending, users_notified, dpa_notified, completed')
+  .option('--notes <notes>', 'Additional notes')
+  .action(async (id: string, options) => {
+    const spinner = ora('Updating breach...').start();
+    try {
+      const client = getClient();
+      const result = await client.updateBreachStatus(id, {
+        status: options.status,
+        notification_status: options.notification,
+        notes: options.notes,
+      });
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.green.bold('✓ Breach updated'));
+      console.log(`Status:        ${chalk.yellow(result.breach.status)}`);
+      console.log(`Notification:  ${chalk.yellow(result.breach.notification_status)}`);
     } catch (error) {
       spinner.stop();
       console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
