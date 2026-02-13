@@ -1,6 +1,6 @@
 {
   "name": "@tuteliq/cli",
-  "version": "1.2.0",
+  "version": "2.1.0",
   "description": "Tuteliq CLI - AI-powered child safety analysis from your terminal",
   "type": "module",
   "bin": {
@@ -26,7 +26,7 @@
   },
   "homepage": "https://tuteliq.ai",
   "dependencies": {
-    "@tuteliq/sdk": "^1.0.2",
+    "@tuteliq/sdk": "^2.0.0",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
     "conf": "^12.0.0",

@@ -4,18 +4,18 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import ora from 'ora';
 import Conf from 'conf';
-import { TuteliqClient } from '@tuteliq/sdk';
+import { Tuteliq } from '@tuteliq/sdk';
 
 const config = new Conf({ projectName: 'tuteliq' });
-const VERSION = '1.1.0';
+const VERSION = '2.1.0';
 
-function getClient(): TuteliqClient {
+function getClient(): Tuteliq {
   const apiKey = config.get('apiKey') as string;
   if (!apiKey) {
     console.error(chalk.red('Not logged in. Run: tuteliq login <api-key>'));
     process.exit(1);
   }
-  return new TuteliqClient(apiKey);
+  return new Tuteliq(apiKey);
 }
 
 function formatSeverity(severity: string): string {
@@ -599,6 +599,401 @@ breach
       console.log(chalk.green.bold('✓ Breach updated'));
       console.log(`Status:        ${chalk.yellow(result.breach.status)}`);
       console.log(`Notification:  ${chalk.yellow(result.breach.notification_status)}`);
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// Voice analysis
+program
+  .command('voice <file>')
+  .description('Analyze an audio file for safety concerns')
+  .option('-t, --type <type>', 'Analysis type: bullying, unsafe, grooming, emotions, all', 'all')
+  .option('-l, --language <lang>', 'Language hint (e.g., en, es)')
+  .option('-a, --age <number>', 'Child age (for grooming analysis)')
+  .action(async (file: string, options) => {
+    const spinner = ora('Analyzing audio...').start();
+    try {
+      const client = getClient();
+      const fs = await import('fs');
+      const path = await import('path');
+      const buffer = fs.readFileSync(file);
+      const filename = path.basename(file);
+      const result = await client.analyzeVoice({
+        file: buffer,
+        filename,
+        analysisType: options.type,
+        language: options.language,
+        childAge: options.age ? parseInt(options.age) : undefined,
+      });
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.bold('Voice Analysis'));
+      console.log();
+      console.log(`Severity:    ${formatSeverity(result.overall_severity)}`);
+      console.log(`Risk Score:  ${chalk.cyan((result.overall_risk_score * 100).toFixed(0) + '%')}`);
+      console.log(`Language:    ${chalk.cyan(result.transcription.language)}`);
+      console.log(`Duration:    ${chalk.cyan(result.transcription.duration.toFixed(1) + 's')}`);
+      console.log();
+      console.log(chalk.dim('Transcript:'));
+      console.log(result.transcription.text);
+      if (result.analysis.bullying) {
+        console.log();
+        console.log(`Bullying: ${result.analysis.bullying.is_bullying ? chalk.red('DETECTED') : chalk.green('Clear')}`);
+      }
+      if (result.analysis.unsafe) {
+        console.log(`Unsafe:   ${result.analysis.unsafe.unsafe ? chalk.red('DETECTED') : chalk.green('Clear')}`);
+      }
+      if (result.analysis.grooming) {
+        console.log(`Grooming: ${result.analysis.grooming.grooming_risk !== 'none' ? chalk.red(result.analysis.grooming.grooming_risk.toUpperCase()) : chalk.green('Clear')}`);
+      }
+      if (result.analysis.emotions) {
+        console.log(`Emotions: ${chalk.cyan(result.analysis.emotions.dominant_emotions.join(', '))}`);
+      }
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// Image analysis
+program
+  .command('image <file>')
+  .description('Analyze an image for safety concerns')
+  .option('-t, --type <type>', 'Analysis type: bullying, unsafe, emotions, all', 'all')
+  .action(async (file: string, options) => {
+    const spinner = ora('Analyzing image...').start();
+    try {
+      const client = getClient();
+      const fs = await import('fs');
+      const path = await import('path');
+      const buffer = fs.readFileSync(file);
+      const filename = path.basename(file);
+      const result = await client.analyzeImage({
+        file: buffer,
+        filename,
+        analysisType: options.type,
+      });
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.bold('Image Analysis'));
+      console.log();
+      console.log(`Severity:    ${formatSeverity(result.overall_severity)}`);
+      console.log(`Risk Score:  ${chalk.cyan((result.overall_risk_score * 100).toFixed(0) + '%')}`);
+      console.log();
+      console.log(chalk.dim('Vision:'));
+      console.log(`Description:  ${result.vision.visual_description}`);
+      console.log(`Visual Sev.:  ${formatSeverity(result.vision.visual_severity)}`);
+      console.log(`Has Text:     ${result.vision.contains_text ? 'Yes' : 'No'}`);
+      console.log(`Has Faces:    ${result.vision.contains_faces ? 'Yes' : 'No'}`);
+      if (result.vision.extracted_text) {
+        console.log();
+        console.log(chalk.dim('Extracted Text:'));
+        console.log(result.vision.extracted_text);
+      }
+      if (result.text_analysis?.bullying) {
+        console.log();
+        console.log(`Bullying: ${result.text_analysis.bullying.is_bullying ? chalk.red('DETECTED') : chalk.green('Clear')}`);
+      }
+      if (result.text_analysis?.unsafe) {
+        console.log(`Unsafe:   ${result.text_analysis.unsafe.unsafe ? chalk.red('DETECTED') : chalk.green('Clear')}`);
+      }
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// Webhook management
+const webhook = program
+  .command('webhook')
+  .description('Webhook management');
+
+webhook
+  .command('list')
+  .description('List all webhooks')
+  .action(async () => {
+    const spinner = ora('Fetching webhooks...').start();
+    try {
+      const client = getClient();
+      const result = await client.listWebhooks();
+      spinner.stop();
+
+      if (result.webhooks.length === 0) {
+        console.log(chalk.dim('No webhooks configured.'));
+        return;
+      }
+
+      console.log();
+      for (const w of result.webhooks) {
+        const status = w.is_active ? chalk.green('active') : chalk.dim('inactive');
+        console.log(`${chalk.bold(w.name)} ${status} ${chalk.dim(`(${w.id})`)}`);
+        console.log(`  URL:    ${chalk.cyan(w.url)}`);
+        console.log(`  Events: ${w.events.join(', ')}`);
+      }
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+webhook
+  .command('create')
+  .description('Create a new webhook')
+  .requiredOption('-n, --name <name>', 'Webhook name')
+  .requiredOption('-u, --url <url>', 'Webhook URL')
+  .requiredOption('-e, --events <events>', 'Events (comma-separated)')
+  .action(async (options) => {
+    const spinner = ora('Creating webhook...').start();
+    try {
+      const client = getClient();
+      const result = await client.createWebhook({
+        name: options.name,
+        url: options.url,
+        events: options.events.split(',').map((s: string) => s.trim()),
+      });
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.green.bold('✓ Webhook created'));
+      console.log(`ID:   ${chalk.cyan(result.webhook.id)}`);
+      console.log(`Name: ${result.webhook.name}`);
+      console.log();
+      console.log(chalk.yellow.bold('Secret (save this — shown only once):'));
+      console.log(chalk.yellow(result.secret));
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+webhook
+  .command('update <id>')
+  .description('Update a webhook')
+  .option('-n, --name <name>', 'New name')
+  .option('-u, --url <url>', 'New URL')
+  .option('-e, --events <events>', 'New events (comma-separated)')
+  .option('--enable', 'Enable the webhook')
+  .option('--disable', 'Disable the webhook')
+  .action(async (id: string, options) => {
+    const spinner = ora('Updating webhook...').start();
+    try {
+      const client = getClient();
+      const result = await client.updateWebhook(id, {
+        name: options.name,
+        url: options.url,
+        events: options.events ? options.events.split(',').map((s: string) => s.trim()) : undefined,
+        isActive: options.enable ? true : options.disable ? false : undefined,
+      });
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.green.bold('✓ Webhook updated'));
+      console.log(`Name:   ${result.webhook.name}`);
+      console.log(`Active: ${result.webhook.is_active ? chalk.green('Yes') : chalk.dim('No')}`);
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+webhook
+  .command('delete <id>')
+  .description('Delete a webhook')
+  .action(async (id: string) => {
+    const spinner = ora('Deleting webhook...').start();
+    try {
+      const client = getClient();
+      await client.deleteWebhook(id);
+      spinner.stop();
+      console.log(chalk.green.bold('✓ Webhook deleted'));
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+webhook
+  .command('test <id>')
+  .description('Test a webhook')
+  .action(async (id: string) => {
+    const spinner = ora('Testing webhook...').start();
+    try {
+      const client = getClient();
+      const result = await client.testWebhook(id);
+      spinner.stop();
+
+      console.log();
+      if (result.success) {
+        console.log(chalk.green.bold('✓ Webhook test passed'));
+      } else {
+        console.log(chalk.red.bold('✗ Webhook test failed'));
+      }
+      console.log(`Status:  ${chalk.cyan(String(result.status_code))}`);
+      console.log(`Latency: ${chalk.cyan(result.latency_ms + 'ms')}`);
+      if (result.error) {
+        console.log(`Error:   ${chalk.red(result.error)}`);
+      }
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+webhook
+  .command('regenerate-secret <id>')
+  .description('Regenerate webhook signing secret')
+  .action(async (id: string) => {
+    const spinner = ora('Regenerating secret...').start();
+    try {
+      const client = getClient();
+      const result = await client.regenerateWebhookSecret(id);
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.green.bold('✓ Secret regenerated'));
+      console.log(chalk.yellow.bold('New Secret (save this — shown only once):'));
+      console.log(chalk.yellow(result.secret));
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// Pricing
+program
+  .command('pricing')
+  .description('Show pricing plans')
+  .option('-d, --details', 'Show detailed pricing')
+  .action(async (options) => {
+    const spinner = ora('Fetching pricing...').start();
+    try {
+      const client = getClient();
+      if (options.details) {
+        const result = await client.getPricingDetails();
+        spinner.stop();
+        console.log();
+        for (const p of result.plans) {
+          console.log(chalk.bold(p.name));
+          console.log(`  Monthly: ${chalk.cyan(p.price_monthly + '/mo')} | Yearly: ${chalk.cyan(p.price_yearly + '/mo')}`);
+          console.log(`  API Calls: ${chalk.cyan(String(p.api_calls_per_month) + '/mo')} | Rate Limit: ${chalk.cyan(String(p.rate_limit) + '/min')}`);
+          p.features.forEach((f: string) => console.log(`  - ${f}`));
+          console.log();
+        }
+      } else {
+        const result = await client.getPricing();
+        spinner.stop();
+        console.log();
+        for (const p of result.plans) {
+          console.log(`${chalk.bold(p.name)} — ${chalk.cyan(p.price)}`);
+          p.features.forEach((f: string) => console.log(`  - ${f}`));
+          console.log();
+        }
+      }
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+// Usage and billing
+const usage = program
+  .command('usage')
+  .description('Usage and billing information');
+
+usage
+  .command('monthly')
+  .description('Show monthly usage summary')
+  .action(async () => {
+    const spinner = ora('Fetching usage...').start();
+    try {
+      const client = getClient();
+      const result = await client.getUsageMonthly();
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.bold(`${result.tier_display_name} Plan`));
+      console.log();
+      console.log(`Used:       ${chalk.cyan(String(result.usage.used))} / ${result.usage.limit} (${result.usage.percent_used.toFixed(1)}%)`);
+      console.log(`Remaining:  ${chalk.cyan(String(result.usage.remaining))}`);
+      console.log(`Rate Limit: ${chalk.cyan(result.rate_limit.requests_per_minute + '/min')}`);
+      console.log(`Period:     ${chalk.dim(result.billing.current_period_start + ' → ' + result.billing.current_period_end)}`);
+      console.log(`Days Left:  ${chalk.cyan(String(result.billing.days_remaining))}`);
+      if (result.recommendations?.should_upgrade) {
+        console.log();
+        console.log(chalk.yellow(`Recommendation: ${result.recommendations.reason}`));
+        console.log(chalk.yellow(`Suggested: ${result.recommendations.suggested_tier}`));
+      }
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+usage
+  .command('history')
+  .description('Show daily usage history')
+  .option('-d, --days <number>', 'Number of days (1-30)', '7')
+  .action(async (options) => {
+    const spinner = ora('Fetching history...').start();
+    try {
+      const client = getClient();
+      const result = await client.getUsageHistory(parseInt(options.days));
+      spinner.stop();
+
+      if (result.days.length === 0) {
+        console.log(chalk.dim('No usage data available.'));
+        return;
+      }
+
+      console.log();
+      console.log(chalk.bold('Date          Total  Success  Errors'));
+      console.log(chalk.dim('─'.repeat(45)));
+      for (const d of result.days) {
+        console.log(`${d.date}  ${String(d.total_requests).padStart(5)}  ${String(d.success_requests).padStart(7)}  ${String(d.error_requests).padStart(6)}`);
+      }
+    } catch (error) {
+      spinner.stop();
+      console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);
+      process.exit(1);
+    }
+  });
+
+usage
+  .command('by-tool')
+  .description('Show usage by tool/endpoint')
+  .option('-d, --date <date>', 'Date (YYYY-MM-DD, default: today)')
+  .action(async (options) => {
+    const spinner = ora('Fetching usage...').start();
+    try {
+      const client = getClient();
+      const result = await client.getUsageByTool(options.date);
+      spinner.stop();
+
+      console.log();
+      console.log(chalk.bold(`Usage by Tool — ${result.date}`));
+      console.log();
+      if (Object.keys(result.tools).length > 0) {
+        for (const [tool, count] of Object.entries(result.tools)) {
+          console.log(`  ${tool.padEnd(25)} ${chalk.cyan(String(count))}`);
+        }
+      } else {
+        console.log(chalk.dim('  No data for this date.'));
+      }
     } catch (error) {
       spinner.stop();
       console.error(chalk.red('Error:'), error instanceof Error ? error.message : error);

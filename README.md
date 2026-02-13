@@ -79,6 +79,40 @@ tuteliq action-plan "Child is being bullied at school"
 tuteliq plan "..." --age 12 --audience parent --severity high
 ```
 
+### Voice & Image Analysis
+
+```bash
+# Analyze audio for safety concerns
+tuteliq voice recording.mp3
+tuteliq voice call.wav --type bullying --language en
+
+# Analyze image for safety concerns
+tuteliq image screenshot.png
+tuteliq image photo.jpg --type unsafe
+```
+
+### Webhook Management
+
+```bash
+tuteliq webhook list
+tuteliq webhook create -n "Safety Alerts" -u https://example.com/webhook -e "incident.critical,grooming.detected"
+tuteliq webhook update <id> --disable
+tuteliq webhook test <id>
+tuteliq webhook delete <id>
+tuteliq webhook regenerate-secret <id>
+```
+
+### Pricing & Usage
+
+```bash
+tuteliq pricing
+tuteliq pricing --details
+
+tuteliq usage monthly
+tuteliq usage history --days 14
+tuteliq usage by-tool --date 2026-02-13
+```
+
 ## Examples
 
 ### Check a message for bullying
